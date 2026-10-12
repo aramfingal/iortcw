@@ -85,6 +85,8 @@ Makefile.local:
   * SERVERBIN           - rename 'iowolfded' server binary
   * CLIENTBIN           - rename 'iowolfmp' or 'iowolfsp' client binary
   * USE_RENDERER_DLOPEN - build and use the renderer in a library
+  * BUILD_RENDERER_REND2 - build the OpenGL2 renderer (rend2)
+  * BUILD_RENDERER_METAL - build the Metal renderer (macOS arm64 only, on by default there)
   * USE_YACC            - use yacc to update code/tools/lcc/lburg/gram.c
   * BASEGAME            - rename 'main'
   * BASEGAME_CFLAGS     - custom CFLAGS for basegame
