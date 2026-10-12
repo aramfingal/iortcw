@@ -32,6 +32,9 @@ endif
 ifndef BUILD_RENDERER_REND2
   BUILD_RENDERER_REND2 =
 endif
+ifndef BUILD_RENDERER_METAL
+  BUILD_RENDERER_METAL =
+endif
 
 #############################################################################
 #
@@ -274,6 +277,8 @@ CDIR=$(MOUNT_DIR)/client
 SDIR=$(MOUNT_DIR)/server
 RDIR=$(MOUNT_DIR)/renderer
 R2DIR=$(MOUNT_DIR)/rend2
+RMDIR=$(MOUNT_DIR)/renderermetal
+METALCPPDIR=$(MOUNT_DIR)/metal-cpp
 CMDIR=$(MOUNT_DIR)/qcommon
 SDLDIR=$(MOUNT_DIR)/sdl
 ASMDIR=$(MOUNT_DIR)/asm
@@ -584,6 +589,15 @@ ifeq ($(PLATFORM),darwin)
 
   CLIENT_LIBS += -framework IOKit
   RENDERER_LIBS += -framework OpenGL
+
+  # The Metal renderer (cl_renderer metal) is C++17 on top of metal-cpp and
+  # needs the macOS 13 SDK or later. It is only built as a loadable renderer.
+  ifeq ($(BUILD_RENDERER_METAL),)
+    ifeq ($(ARCH),arm64)
+      BUILD_RENDERER_METAL = 1
+    endif
+  endif
+  METAL_LIBS = -framework Metal -framework Foundation -framework QuartzCore -framework Cocoa
 
   ifeq ($(USE_LOCAL_HEADERS),1)
     # libSDL2-2.0.0.dylib for PPC is SDL 2.0.1 + changes to compile
@@ -1114,6 +1128,9 @@ ifneq ($(BUILD_CLIENT),0)
     ifneq ($(BUILD_RENDERER_REND2), 0)
       TARGETS += $(B)/renderer_sp_rend2_$(SHLIBNAME)
     endif
+    ifeq ($(BUILD_RENDERER_METAL), 1)
+      TARGETS += $(B)/renderer_sp_metal_$(SHLIBNAME)
+    endif
   else
     TARGETS += $(B)/$(CLIENTBIN)$(FULLBINEXT)
     ifneq ($(BUILD_RENDERER_REND2), 0)
@@ -1333,6 +1350,13 @@ $(echo_cmd) "REF_CC $<"
 $(Q)$(CC) $(SHLIBCFLAGS) $(CFLAGS) $(CLIENT_CFLAGS) $(OPTIMIZE) $(ALTIVEC_CFLAGS) -o $@ -c $<
 endef
 
+define DO_REF_METAL_CXX
+$(echo_cmd) "REF_CXX $<"
+$(Q)$(CXX) $(SHLIBCFLAGS) $(filter-out -std=% -Wstrict-prototypes,$(CFLAGS)) $(CLIENT_CFLAGS) $(OPTIMIZE) \
+	-std=c++17 -fno-operator-names -Wno-deprecated-declarations -Wno-write-strings \
+	-I$(METALCPPDIR) -include $(RMDIR)/tr_metal_prefix.h -o $@ -c $<
+endef
+
 define DO_REF_STR
 $(echo_cmd) "REF_STR $<"
 $(Q)rm -f $@
@@ -1538,6 +1562,7 @@ makedirs:
 	@$(MKDIR) $(B)/renderer
 	@$(MKDIR) $(B)/rend2
 	@$(MKDIR) $(B)/rend2/glsl
+	@$(MKDIR) $(B)/renderermetal
 	@$(MKDIR) $(B)/ded
 	@$(MKDIR) $(B)/$(BASEGAME)/cgame
 	@$(MKDIR) $(B)/$(BASEGAME)/game
@@ -1921,6 +1946,54 @@ Q3R2STRINGOBJ = \
   $(B)/rend2/glsl/texturecolor_vp.o \
   $(B)/rend2/glsl/tonemap_fp.o \
   $(B)/rend2/glsl/tonemap_vp.o
+
+# The Metal renderer has no GLSL strings and no SDL GL glue: its window code is
+# tr_metal_glimp.cpp and its shaders are MSL compiled at run time.
+Q3RMOBJ = \
+  $(B)/renderermetal/tr_animation.o \
+  $(B)/renderermetal/tr_backend.o \
+  $(B)/renderermetal/tr_bsp.o \
+  $(B)/renderermetal/tr_cmds.o \
+  $(B)/renderermetal/tr_curve.o \
+  $(B)/renderermetal/tr_dsa.o \
+  $(B)/renderermetal/tr_extramath.o \
+  $(B)/renderermetal/tr_extensions.o \
+  $(B)/renderermetal/tr_fbo.o \
+  $(B)/renderermetal/tr_flares.o \
+  $(B)/renderermetal/tr_glsl.o \
+  $(B)/renderermetal/tr_image.o \
+  $(B)/renderermetal/tr_image_dds.o \
+  $(B)/renderermetal/tr_init.o \
+  $(B)/renderermetal/tr_light.o \
+  $(B)/renderermetal/tr_main.o \
+  $(B)/renderermetal/tr_marks.o \
+  $(B)/renderermetal/tr_mesh.o \
+  $(B)/renderermetal/tr_metal_device.o \
+  $(B)/renderermetal/tr_metal_glimp.o \
+  $(B)/renderermetal/tr_metal_shadersource.o \
+  $(B)/renderermetal/tr_model.o \
+  $(B)/renderermetal/tr_model_iqm.o \
+  $(B)/renderermetal/tr_postprocess.o \
+  $(B)/renderermetal/tr_scene.o \
+  $(B)/renderermetal/tr_shade.o \
+  $(B)/renderermetal/tr_shade_calc.o \
+  $(B)/renderermetal/tr_shader.o \
+  $(B)/renderermetal/tr_shadows.o \
+  $(B)/renderermetal/tr_sky.o \
+  $(B)/renderermetal/tr_surface.o \
+  $(B)/renderermetal/tr_vbo.o \
+  $(B)/renderermetal/tr_world.o \
+  $(B)/renderermetal/tr_font.o \
+  $(B)/renderermetal/tr_image_bmp.o \
+  $(B)/renderermetal/tr_image_jpg.o \
+  $(B)/renderermetal/tr_image_pcx.o \
+  $(B)/renderermetal/tr_image_png.o \
+  $(B)/renderermetal/tr_image_tga.o \
+  $(B)/renderermetal/tr_noise.o \
+  $(B)/renderer/q_shared.o \
+  $(B)/renderer/puff.o \
+  $(B)/renderer/q_math.o \
+  $(B)/renderer/tr_subs.o
 
 Q3ROBJ = \
   $(B)/renderer/tr_altivec.o \
@@ -2336,6 +2409,11 @@ $(B)/renderer_sp_rend2_$(SHLIBNAME): $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTO
 	$(echo_cmd) "LD $@"
 	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3R2OBJ) $(Q3R2STRINGOBJ) $(JPGOBJ) $(FTOBJ) \
 		$(THREAD_LIBS) $(LIBSDLMAIN) $(RENDERER_LIBS) $(LIBS)
+
+$(B)/renderer_sp_metal_$(SHLIBNAME): $(Q3RMOBJ) $(JPGOBJ) $(FTOBJ)
+	$(echo_cmd) "LD $@"
+	$(Q)$(CXX) $(filter-out -std=% -Wstrict-prototypes,$(CFLAGS)) $(SHLIBLDFLAGS) -o $@ $(Q3RMOBJ) $(JPGOBJ) $(FTOBJ) \
+		$(THREAD_LIBS) $(LIBSDLMAIN) $(subst -framework OpenGL,,$(RENDERER_LIBS)) $(METAL_LIBS) $(LIBS)
 else
 $(B)/$(CLIENTBIN)$(FULLBINEXT): $(Q3OBJ) $(Q3ROBJ) $(JPGOBJ) $(FTOBJ) $(LIBSDLMAIN)
 	$(echo_cmd) "LD $@"
@@ -2750,6 +2828,12 @@ $(B)/rend2/glsl/%.o: $(B)/rend2/glsl/%.c
 	$(DO_REF_CC)
 	
 $(B)/rend2/%.o: $(R2DIR)/%.c
+	$(DO_REF_CC)
+
+$(B)/renderermetal/%.o: $(RMDIR)/%.cpp
+	$(DO_REF_METAL_CXX)
+
+$(B)/renderermetal/%.o: $(RMDIR)/%.c
 	$(DO_REF_CC)
 
 $(B)/renderer/%.o: $(FTDIR)/src/autofit/%.c
